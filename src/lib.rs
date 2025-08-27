@@ -12,11 +12,14 @@
 //!   - 自动获取临时认证token，无需配置API密钥
 //!   - 支持并发操作
 //! - 统一的翻译接口，易于扩展
+//! - 类型安全的语言标识符支持
+//! - 可配置的超时和重试机制
 //!
 //! ## 使用方法
 //!
 //! ```rust,no_run
-//! use async_translate::{TranslationManager, OpenAITranslator, OpenAIConfig, MicrosoftTranslator, MicrosoftConfig};
+//! use async_translate::{TranslationManager, OpenAITranslator, OpenAIConfig, MicrosoftTranslator, MicrosoftConfig, LanguageIdentifier, TranslateOptions};
+//! use std::time::Duration;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -37,7 +40,8 @@
 //!
 //!     // 配置微软翻译器（自动获取认证token）
 //!     let microsoft_config = MicrosoftConfig {
-//!         endpoint: "https://api-edge.cognitive.microsofttranslator.com".to_string(),
+//!         endpoint: None,  // 使用默认端点
+//!         api_key: None,   // 使用自动认证
 //!         concurrent_limit: 10,
 //!     };
 //!     let microsoft_translator = Box::new(MicrosoftTranslator::new(microsoft_config));
@@ -45,26 +49,35 @@
 //!
 //!     // 执行翻译
 //!     let text = "Hello, world!";
-//!     let target_lang = "zh";
+//!     let target_lang: LanguageIdentifier = "zh".parse().unwrap();
 //!
-//!     let result = manager.translate("openai", text, target_lang).await?;
+//!     // 基本翻译（使用默认配置）
+//!     let result = manager.translate("openai", text, &target_lang, None).await?;
 //!     println!("OpenAI Translation: {}", result);
 //!
-//!     let result = manager.translate("microsoft", text, target_lang).await?;
+//!     // 带配置的翻译
+//!     let options = TranslateOptions::default()
+//!         .timeout(Duration::from_secs(60))
+//!         .max_retries(5);
+//!     let result = manager.translate_with_options("microsoft", text, &target_lang, None, &options).await?;
 //!     println!("Microsoft Translation: {}", result);
 //!
 //!     Ok(())
 //! }
 //! ```
 
+pub mod error;
 pub mod manager;
 pub mod microsoft;
 pub mod openai;
+pub mod options;
 pub mod translator;
 
+pub use error::TranslationError;
 pub use manager::TranslationManager;
 pub use microsoft::{MicrosoftConfig, MicrosoftTranslator};
 pub use openai::{OpenAIConfig, OpenAITranslator};
+pub use options::TranslateOptions;
 pub use translator::Translator;
 
 // 导出语言标识符类型

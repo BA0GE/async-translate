@@ -4,10 +4,11 @@
 
 use anyhow::Result;
 use async_translate::{
+    LanguageIdentifier, TranslateOptions, Translator,
     manager::TranslationManager,
     microsoft::{MicrosoftConfig, MicrosoftTranslator},
-    LanguageIdentifier, Translator,
 };
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -15,7 +16,8 @@ async fn main() -> Result<()> {
 
     // 创建翻译器
     let translator = MicrosoftTranslator::new(MicrosoftConfig {
-        endpoint: "https://api-edge.cognitive.microsofttranslator.com".to_string(),
+        endpoint: None, // 使用默认端点
+        api_key: None,  // 使用自动认证
         concurrent_limit: 10,
     });
 
@@ -28,7 +30,7 @@ async fn main() -> Result<()> {
     println!("📝 基本翻译示例：");
     println!("   英文 'Hello' -> 中文 '{}'", chinese);
 
-    match translator.translate_langid("Hello", &chinese).await {
+    match translator.translate("Hello", &chinese, None).await {
         Ok(result) => println!("   结果: '{}'\n", result),
         Err(e) => println!("   错误: {}\n", e),
     }
@@ -36,21 +38,20 @@ async fn main() -> Result<()> {
     println!("🔄 带源语言的翻译示例：");
     println!("   英文 'Hello' -> 日文 '{}'", japanese);
 
-    match translator.translate_with_langid("Hello", Some(&english), &japanese).await {
+    match translator
+        .translate("Hello", &japanese, Some(&english))
+        .await
+    {
         Ok(result) => println!("   结果: '{}'\n", result),
         Err(e) => println!("   错误: {}\n", e),
     }
 
     println!("🌐 多语言翻译示例：");
     let text = "Thank you";
-    let languages = vec![
-        ("中文", &chinese),
-        ("日文", &japanese),
-        ("韩文", &korean),
-    ];
+    let languages = vec![("中文", &chinese), ("日文", &japanese), ("韩文", &korean)];
 
     for (lang_name, lang_id) in languages {
-        match translator.translate_langid(text, lang_id).await {
+        match translator.translate(text, lang_id, None).await {
             Ok(result) => println!("   英文 '{}' -> {} '{}'", text, lang_name, result),
             Err(e) => println!("   英文 '{}' -> {} 错误: {}", text, lang_name, e),
         }
@@ -58,14 +59,35 @@ async fn main() -> Result<()> {
 
     println!("\n🎯 Manager 中使用 LanguageIdentifier：");
     let mut manager = TranslationManager::new();
-    manager.add_translator("microsoft", Box::new(MicrosoftTranslator::new(MicrosoftConfig {
-        endpoint: "https://api-edge.cognitive.microsofttranslator.com".to_string(),
-        concurrent_limit: 5,
-    })));
+    manager.add_translator(
+        "microsoft",
+        Box::new(MicrosoftTranslator::new(MicrosoftConfig {
+            endpoint: None, // 使用默认端点
+            api_key: None,  // 使用自动认证
+            concurrent_limit: 5,
+        })),
+    );
 
-    match manager.translate_langid("microsoft", "Good morning", &chinese).await {
+    let chinese_clone = chinese.clone();
+    match manager
+        .translate("microsoft", "Good morning", &chinese_clone, None)
+        .await
+    {
         Ok(result) => println!("   Manager 翻译结果: '{}'", result),
         Err(e) => println!("   Manager 翻译错误: {}", e),
+    }
+
+    println!("\n⚙️  使用配置选项示例：");
+    let options = TranslateOptions::default()
+        .timeout(Duration::from_secs(45))
+        .max_retries(3);
+
+    match translator
+        .translate_with_options("Hello, world!", &chinese, None, &options)
+        .await
+    {
+        Ok(result) => println!("   带配置的翻译结果: '{}'", result),
+        Err(e) => println!("   带配置的翻译错误: {}", e),
     }
 
     println!("\n✅ LanguageIdentifier 示例完成！");

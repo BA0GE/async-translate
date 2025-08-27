@@ -8,12 +8,13 @@
 
 use anyhow::Result;
 use async_translate::{
+    LanguageIdentifier, TranslateOptions, Translator,
     manager::TranslationManager,
     microsoft::{MicrosoftConfig, MicrosoftTranslator},
     openai::{OpenAIConfig, OpenAITranslator},
-    LanguageIdentifier, Translator,
 };
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{error, info};
 
 #[tokio::main]
@@ -52,7 +53,8 @@ async fn main() -> Result<()> {
 
     // 配置微软翻译器（自动获取认证token）
     let microsoft_config = MicrosoftConfig {
-        endpoint: "https://api-edge.cognitive.microsofttranslator.com".to_string(),
+        endpoint: None, // 使用默认端点
+        api_key: None,  // 使用自动认证
         concurrent_limit: 10,
     };
     let microsoft_translator = Box::new(MicrosoftTranslator::new(microsoft_config));
@@ -70,7 +72,7 @@ async fn main() -> Result<()> {
         "This is a concurrent translation example.",
     ];
 
-    let target_lang = "zh";
+    let target_lang: LanguageIdentifier = "zh".parse().unwrap();
 
     info!("Translating {} texts to {}", texts.len(), target_lang);
 
@@ -79,12 +81,14 @@ async fn main() -> Result<()> {
 
     for text in texts.iter() {
         let text_str = text.to_string();
+        let target_lang_clone = target_lang.clone();
 
         // 为每个任务创建manager的引用
         let manager1 = Arc::clone(&manager);
+        let target_lang_clone1 = target_lang_clone.clone();
         let task1 = tokio::spawn(async move {
             match manager1
-                .translate("openai_default", &text_str, &target_lang)
+                .translate("openai_default", &text_str, &target_lang_clone1, None)
                 .await
             {
                 Ok(result) => {
@@ -106,10 +110,11 @@ async fn main() -> Result<()> {
         tasks.push(task1);
 
         let text_str = text.to_string();
+        let target_lang_clone2 = target_lang_clone.clone();
         let manager2 = Arc::clone(&manager);
         let task2 = tokio::spawn(async move {
             match manager2
-                .translate("openai_custom", &text_str, &target_lang)
+                .translate("openai_custom", &text_str, &target_lang_clone2, None)
                 .await
             {
                 Ok(result) => {
@@ -134,7 +139,7 @@ async fn main() -> Result<()> {
         let manager3 = Arc::clone(&manager);
         let task3 = tokio::spawn(async move {
             match manager3
-                .translate("microsoft", &text_str, &target_lang)
+                .translate("microsoft", &text_str, &target_lang_clone, None)
                 .await
             {
                 Ok(result) => {
@@ -163,16 +168,22 @@ async fn main() -> Result<()> {
     info!("\n=== 直接使用翻译器实例示例 ===");
 
     let microsoft_config = MicrosoftConfig {
-        endpoint: "https://api-edge.cognitive.microsofttranslator.com".to_string(),
+        endpoint: None,      // 使用默认端点
+        api_key: None,       // 使用自动认证
         concurrent_limit: 5, // 直接使用时可以设置较小的并发限制
     };
     let microsoft_translator = MicrosoftTranslator::new(microsoft_config);
 
     // 直接调用翻译器
     let texts = vec!["Good morning!", "How are you?", "Thank you!"];
+    let target_lang: LanguageIdentifier = "zh".parse().unwrap();
 
     for text in texts {
-        match microsoft_translator.translate(text, "zh").await {
+        let target_lang_clone = target_lang.clone();
+        match microsoft_translator
+            .translate(text, &target_lang_clone, None)
+            .await
+        {
             Ok(result) => {
                 info!("Direct translation: '{}' -> '{}'", text, result);
             }
@@ -184,10 +195,8 @@ async fn main() -> Result<()> {
 
     info!("Direct translation example completed!");
 
-    // 示例3：使用 LanguageIdentifier
-    info!("\n=== 使用 LanguageIdentifier 示例 ===");
-
-    // LanguageIdentifier 已在文件顶部导入
+    // 示例3：使用 LanguageIdentifier 指定源语言
+    info!("\n=== 使用 LanguageIdentifier 指定源语言示例 ===");
 
     // 解析语言标识符
     let chinese: LanguageIdentifier = "zh-CN".parse().unwrap();
@@ -197,20 +206,31 @@ async fn main() -> Result<()> {
     let texts = vec!["Hello", "Thank you", "Good morning"];
 
     for text in texts {
-        match microsoft_translator.translate_langid(text, &chinese).await {
+        let chinese_clone = chinese.clone();
+        // 自动检测源语言
+        match microsoft_translator
+            .translate(text, &chinese_clone, None)
+            .await
+        {
             Ok(result) => {
-                info!("LanguageIdentifier translation: '{}' -> '{}'", text, result);
+                info!("Auto-detect translation: '{}' -> '{}'", text, result);
             }
             Err(e) => {
-                error!("LanguageIdentifier translation error for '{}': {}", text, e);
+                error!("Auto-detect translation error for '{}': {}", text, e);
             }
         }
     }
 
     // 使用带源语言的翻译
-    match microsoft_translator.translate_with_langid("Hello", Some(&english), &japanese).await {
+    match microsoft_translator
+        .translate("Hello", &japanese, Some(&english))
+        .await
+    {
         Ok(result) => {
-            info!("Translation with source lang: 'Hello' (en) -> '{}' (ja)", result);
+            info!(
+                "Translation with source lang: 'Hello' (en) -> '{}' (ja)",
+                result
+            );
         }
         Err(e) => {
             error!("Translation with source lang error: {}", e);
@@ -218,6 +238,58 @@ async fn main() -> Result<()> {
     }
 
     info!("LanguageIdentifier example completed!");
+
+    // 示例4：使用配置选项
+    info!("\n=== 使用配置选项示例 ===");
+
+    let options = TranslateOptions::default()
+        .timeout(Duration::from_secs(60))
+        .max_retries(5);
+
+    match microsoft_translator
+        .translate_with_options("Hello, world!", &chinese, None, &options)
+        .await
+    {
+        Ok(result) => {
+            info!("Translation with custom options: '{}'", result);
+        }
+        Err(e) => {
+            error!("Translation with custom options error: {}", e);
+        }
+    }
+
+    info!("Configuration options example completed!");
+
+    // 示例5：批量翻译
+    info!("\n=== 批量翻译示例 ===");
+
+    let batch_texts = vec!["Hello", "World", "Rust", "Translation", "Example"];
+    match microsoft_translator
+        .translate_batch(&batch_texts, &chinese, None, &TranslateOptions::default())
+        .await
+    {
+        Ok(results) => {
+            info!("Batch translation results:");
+            for (i, result) in results.iter().enumerate() {
+                if let Some(translation) = result.translations.first() {
+                    info!("  {}: '{}' -> '{}'", i, batch_texts[i], translation.text);
+                    // 显示检测到的语言（如果有的话）
+                    if let Some(detected) = &result.detected_language {
+                        info!(
+                            "    Detected language: {} (confidence: {:.2})",
+                            detected.language, detected.score
+                        );
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            error!("Batch translation error: {}", e);
+        }
+    }
+
+    info!("Batch translation example completed!");
+    info!("All examples completed!");
 
     Ok(())
 }
